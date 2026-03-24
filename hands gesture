@@ -1,0 +1,257 @@
+import cv2
+import numpy as np
+import mediapipe as mp
+import random
+import time
+
+cap = cv2.VideoCapture(0)
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
+
+
+def get_finger_states(hand_landmarks):
+    fingers = []
+
+    # Thumb
+    if hand_landmarks.landmark[4].x < hand_landmarks.landmark[3].x:
+        fingers.append(1)
+    else:
+        fingers.append(0)
+
+    tip_ids = [8, 12, 16, 20]
+    pip_ids = [6, 10, 14, 18]
+
+    for tip, pip in zip(tip_ids, pip_ids):
+        if hand_landmarks.landmark[tip].y < hand_landmarks.landmark[pip].y:
+            fingers.append(1)
+        else:
+            fingers.append(0)
+
+    return fingers
+
+
+def is_heart_gesture(hand_landmarks, fingers):
+
+    thumb_tip = hand_landmarks.landmark[4]
+    index_tip = hand_landmarks.landmark[8]
+
+    distance = ((thumb_tip.x - index_tip.x) ** 2 +
+                (thumb_tip.y - index_tip.y) ** 2) ** 0.5
+
+    thumb_extended = fingers[0] == 1
+    index_extended = fingers[1] == 1
+    others_closed = all(f == 0 for f in fingers[2:])
+
+    tips_close = distance < 0.06
+
+    return thumb_extended and index_extended and others_closed and tips_close
+
+
+
+
+def show_love_message(cap):
+    start = time.time()
+    while time.time() - start < 2:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame = cv2.flip(frame, 1)
+        h, w, _ = frame.shape
+
+        text = "LOVE YOU TOO!"
+        size = cv2.getTextSize(text, cv2.FONT_HERSHEY_COMPLEX, 1.5, 4)[0]
+        x = (w - size[0]) // 2
+        y = h // 2
+
+        cv2.putText(frame, text, (x, y),
+                    cv2.FONT_HERSHEY_COMPLEX, 1.5, (0, 255, 255), 4)
+
+        cv2.imshow("Rock Paper Scissors", frame)
+        cv2.waitKey(1)
+
+
+def get_random_choice():
+    return random.choice(["STONE", "PAPER", "SCISSORS"])
+
+
+def determine_winner(user, computer):
+    if user == "UNKNOWN":
+        return "none"
+
+    if user == computer:
+        return "tie"
+
+    if (user == "STONE" and computer == "SCISSORS") or \
+       (user == "PAPER" and computer == "STONE") or \
+       (user == "SCISSORS" and computer == "PAPER"):
+        return "user"
+
+    return "computer"
+
+
+user_score = 0
+computer_score = 0
+total_rounds = 3
+
+countdown_moves = ["ROCK!", "PAPER!", "SCISSORS!"]
+move_duration = 2
+show_duration = 0.7
+
+
+with mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+) as hands:
+
+    for round_num in range(1, total_rounds + 1):
+
+        computer_choice = get_random_choice()
+        user_gesture = "UNKNOWN"
+
+        for move in countdown_moves:
+
+            start_time = time.time()
+
+            while time.time() - start_time < move_duration:
+
+                success, frame = cap.read()
+                if not success:
+                    break
+
+                frame = cv2.flip(frame, 1)
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = hands.process(rgb)
+
+                if results.multi_hand_landmarks:
+                    for hand_lms, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                        if handedness.classification[0].label != "Right":
+                            continue
+
+                        mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
+                        fingers = get_finger_states(hand_lms)
+
+                        if is_heart_gesture(hand_lms, fingers):
+                            show_love_message(cap)
+
+                h, w, _ = frame.shape
+                size = cv2.getTextSize(move, cv2.FONT_HERSHEY_COMPLEX, 2.5, 5)[0]
+                x = (w - size[0]) // 2
+                y = (h + size[1]) // 2
+
+                cv2.putText(frame, move, (x, y),
+                            cv2.FONT_HERSHEY_COMPLEX, 2.5, (0, 255, 0), 5)
+
+                cv2.putText(frame, f"ROUND {round_num}", (30, 50),
+                            cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 0), 2)
+
+                cv2.imshow("Rock Paper Scissors", frame)
+
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    exit()
+
+        show_start = time.time()
+
+        while time.time() - show_start < show_duration:
+
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = hands.process(rgb)
+
+            if results.multi_hand_landmarks:
+                for hand_lms, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                    if handedness.classification[0].label != "Right":
+                        continue
+
+                    mp_draw.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
+                    fingers = get_finger_states(hand_lms)
+
+                    if is_heart_gesture(hand_lms, fingers):
+                        show_love_message(cap)
+                        user_gesture = "UNKNOWN"
+                        continue
+
+                    if fingers == [0,0,0,0,0]:
+                        user_gesture = "STONE"
+                    elif fingers == [1,1,1,1,1]:
+                        user_gesture = "PAPER"
+                    elif fingers == [0,1,1,0,0]:
+                        user_gesture = "SCISSORS"
+                    else:
+                        user_gesture = "UNKNOWN"
+
+            h, w, _ = frame.shape
+            cv2.putText(frame, "SHOW NOW!", (w//2 - 220, h//2),
+                        cv2.FONT_HERSHEY_COMPLEX, 2, (0, 0, 255), 5)
+
+            cv2.imshow("Rock Paper Scissors", frame)
+            cv2.waitKey(1)
+
+        winner = determine_winner(user_gesture, computer_choice)
+
+        if winner == "user":
+            user_score += 1
+        elif winner == "computer":
+            computer_score += 1
+
+        result_start = time.time()
+
+        while time.time() - result_start < 2:
+
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+
+            cv2.putText(frame, f"YOU: {user_gesture}", (50, 100),
+                        cv2.FONT_HERSHEY_COMPLEX, 1.2, (0, 255, 0), 3)
+
+            cv2.putText(frame, f"COMPUTER: {computer_choice}", (50, 170),
+                        cv2.FONT_HERSHEY_COMPLEX, 1.2, (0, 0, 255), 3)
+
+            cv2.putText(frame, f"SCORE  YOU:{user_score}  COMP:{computer_score}", (50, 240),
+                        cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 0), 2)
+
+            cv2.imshow("Rock Paper Scissors", frame)
+            cv2.waitKey(1)
+
+
+if user_score > computer_score:
+    winner_text = f"YOU WON!  {user_score} - {computer_score}"
+elif computer_score > user_score:
+    winner_text = f"COMPUTER WON!  {user_score} - {computer_score}"
+else:
+    winner_text = f"IT'S A TIE!  {user_score} - {computer_score}"
+
+final_start = time.time()
+
+while time.time() - final_start < 5:
+
+    success, frame = cap.read()
+    if not success:
+        break
+
+    frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
+
+    size = cv2.getTextSize(winner_text, cv2.FONT_HERSHEY_COMPLEX, 1.5, 4)[0]
+    x = (w - size[0]) // 2
+    y = h // 2
+
+    cv2.putText(frame, winner_text, (x, y),
+                cv2.FONT_HERSHEY_COMPLEX, 1.5, (0, 255, 255), 4)
+
+    cv2.imshow("Rock Paper Scissors", frame)
+    cv2.waitKey(1)
+
+cap.release()
+cv2.destroyAllWindows()
